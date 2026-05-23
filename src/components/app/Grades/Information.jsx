@@ -59,7 +59,7 @@ export default function Information({ sortedGrades, activeAccount, selectedPerio
     const location = useLocation();
     const navigate = useNavigate();
 
-    const { isTabletLayout, actualDisplayTheme, useUserSettings, useUserData } = useContext(AppContext);
+    const { isTabletLayout, actualDisplayTheme, useUserSettings, useUserData, edpFetch, tokenState } = useContext(AppContext);
 
     const settings = useUserSettings();
     const grades = useUserData();
@@ -200,7 +200,7 @@ export default function Information({ sortedGrades, activeAccount, selectedPerio
                         {(selectedElement.examCorrectionSRC || selectedElement.examSubjectSRC) && <div className="files">
                             {selectedElement.examSubjectSRC && <div className="file open-correction" role="button" onClick={async () => {
                                 setIsSubjectLoading(true);
-                                await selectedElement.examSubjectSRC.download();
+                                await selectedElement.examSubjectSRC.download(edpFetch, tokenState);
                                 setIsSubjectLoading(false)
                             }}>
                                 {isSubjectLoading ? <LoadingAnimation className="download-loading-animation" /> : <DownloadIcon className="download-icon" />}
@@ -208,7 +208,7 @@ export default function Information({ sortedGrades, activeAccount, selectedPerio
                             </div>}
                             {selectedElement.examCorrectionSRC && <div className="file download-correction" role="button" onClick={async () => {
                                 setIsCorrectionLoading(true);
-                                await selectedElement.examCorrectionSRC.download();
+                                await selectedElement.examCorrectionSRC.download(edpFetch, tokenState);
                                 setIsCorrectionLoading(false)
                             }}                                    >
                                 {isCorrectionLoading ? <LoadingAnimation className="download-loading-animation" /> : <DownloadIcon className="download-icon" />}

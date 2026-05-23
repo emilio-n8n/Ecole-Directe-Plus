@@ -24,62 +24,41 @@ export function safeParseFloat(value) {
     return isNaN(parsedValue) ? "N/A" : parsedValue
 }
 
-export function calcAverage(list) {
+function _calculateWeightedAverage(list, valueKey, roundingFn) {
     let average = 0;
     let coef = 0;
     list.forEach(i => {
-        if ((i.isSignificant ?? true) && !isNaN(i.value)) {
+        if ((i.isSignificant ?? true) && !isNaN(i[valueKey])) {
             coef += i.coef;
         }
-    })
+    });
 
     const noCoef = !coef;
 
     list.forEach(i => {
-        if ((i.isSignificant ?? true) && !isNaN(i.value)) {
+        if ((i.isSignificant ?? true) && !isNaN(i[valueKey])) {
             if (noCoef) {
-                average += (i.value * 20 / i.scale);
+                average += (i[valueKey] * 20 / i.scale);
                 coef += 1;
             } else {
-                average += (i.value * 20 / i.scale) * i.coef;
+                average += (i[valueKey] * 20 / i.scale) * i.coef;
             }
         }
-    })
+    });
 
     if (coef > 0 && list.length > 0) {
-        return Math.round(average / coef * 100) / 100;
+        return roundingFn(average / coef * 100) / 100;
     } else {
-        return "N/A"
+        return "N/A";
     }
 }
 
+export function calcAverage(list) {
+    return _calculateWeightedAverage(list, "value", Math.round);
+}
+
 export function calcClassAverage(list) {
-    let average = 0;
-    let coef = 0;
-    for (let i of list) {
-        if ((i.isSignificant ?? true) && !isNaN(i.classAverage)) {
-            coef += i.coef;
-        }
-    }
-
-    const noCoef = !coef;
-
-    for (let i of list) {
-        if ((i.isSignificant ?? true) && !isNaN(i.classAverage)) {
-            if (noCoef) {
-                average += (i.classAverage * 20 / i.scale);
-                coef += 1;
-            } else {
-                average += (i.classAverage * 20 / i.scale) * i.coef;
-            }
-        }
-    }
-
-    if (coef > 0 && list.length > 0) {
-        return Math.ceil(average / coef * 100) / 100;
-    } else {
-        return "N/A"
-    }
+    return _calculateWeightedAverage(list, "classAverage", Math.ceil);
 }
 
 export function findCategory(period, subject) {
@@ -133,7 +112,7 @@ export function calcGeneralAverage(period) {
                 for (let validKey of validKeys) {
                     sum += period.subjects[validKey].coef;
                 }
-                coefMultiplicator = sum ? (period.subjects[subjectCode].coef / sum) : 0; // Handle the case where the sum of subSubject coef is 0 
+                coefMultiplicator = sum ? (period.subjects[subjectCode].coef / sum) : 0; // Handle the case where the sum of subSubject coef is 0
             }
             list.push({
                 value: currentSubject.average ?? 0,
@@ -179,10 +158,10 @@ export function formatSkills(skills) {
         id: el.idElemProg,
         name: el.libelleCompetence,
         description: el.descriptif,
-        // On ne connait pas encore les valeures lorsque les compétences ne sont pas valides 
-        // donc on utilisera isNaN() pour savoir si la valeure est un nombre ou non et si ce 
-        // n'est pas le cas on met la valeure à "non évaluée" dans le cas ou les absence, 
-        // les dispense et les non évalués soit aussi des nombres on ajoute la condition que 
+        // On ne connait pas encore les valeures lorsque les compétences ne sont pas valides
+        // donc on utilisera isNaN() pour savoir si la valeure est un nombre ou non et si ce
+        // n'est pas le cas on met la valeure à "non évaluée" dans le cas ou les absence,
+        // les dispense et les non évalués soit aussi des nombres on ajoute la condition que
         // el.valeur soit entre 1 et 4 inclus
         value: isNaN(parseInt(el.valeur)) || parseInt(el.valeur) < 1 || parseInt(el.valeur) > 4 ? "Non évaluée" : skillsValues[parseInt(el.valeur) - 1] // la pire compétence possible commence à 1 donc on ajuste pour les tableaux js
     }))
