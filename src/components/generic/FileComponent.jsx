@@ -1,9 +1,11 @@
-import { useRef } from "react"
+import { useRef, useContext } from "react"
 
 import "./FileComponent.css"
 import DefaultFileIcon from "../graphics/file/DefaultFileIcon";
+import { AppContext } from "../../App";
 
 export default function FileComponent({ file, ...props }) {
+    const { edpFetch, tokenState } = useContext(AppContext);
     const timeOutRef = useRef(null);
     const timeOutCooldownRef = useRef([0, new Date().getTime()]);
 
@@ -12,13 +14,13 @@ export default function FileComponent({ file, ...props }) {
     }
 
     const handleMouseDown = (e) => {
-        file.fetch()
+        file.fetch(edpFetch, tokenState)
         const currentTarget = e.currentTarget;
         currentTarget.classList.remove("filled");
         currentTarget.classList.add("clicked");
         updateTimeoutCooldown(-1)
         timeOutRef.current = setTimeout((target) => {
-            file.download()
+            file.download(edpFetch, tokenState)
             target.classList.remove("clicked");
             target.classList.add("filled");
             updateTimeoutCooldown(1)

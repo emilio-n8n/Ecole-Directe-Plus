@@ -24,7 +24,7 @@ export default function MessageReader({ selectedMessage, fetchMessageMarkAsUnrea
 
     // States
     const location = useLocation();
-    const { useUserData, actualDisplayTheme, useUserSettings } = useContext(AppContext);
+    const { useUserData, actualDisplayTheme, useUserSettings, edpFetch, tokenState } = useContext(AppContext);
     const settings = useUserSettings();
     const messages = useUserData("sortedMessages").get();
     const message = messages ? messages.find((item) => item.id === selectedMessage) : null;
@@ -120,7 +120,7 @@ export default function MessageReader({ selectedMessage, fetchMessageMarkAsUnrea
                         <ScrollShadedDiv enableSideShadows={true} className="scroll-footer-div">
                             <ul className="attachments-container">
                                 {message && message.files && message.files.length > 0
-                                    ? message.files.map((file) => <li key={file.id}><button className="attachment" onClick={() => file.download()}><DownloadIcon className="download-icon" />{file.name + "." + file.extension}</button></li>)
+                                    ? message.files.map((file) => <li key={file.id}><button className="attachment" onClick={() => file.download(edpFetch, tokenState)}><DownloadIcon className="download-icon" />{file.name + "." + file.extension}</button></li>)
                                     : <li className="no-attatchemnts-messages"><p>Aucun fichier joint</p></li>}
                             </ul>
                         </ScrollShadedDiv>

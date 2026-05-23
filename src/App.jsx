@@ -6,6 +6,16 @@ import {
 } from "react-router-dom";
 
 import { getISODate, sendToWebhook } from "./utils/utils";
+import { File, fetchFile } from "./utils/file";
+import {
+    sortGrades,
+    sortNextHomeworks,
+    sortDayHomeworks,
+    sortMessageFolders,
+    sortMessages,
+    sortMessageContent,
+    sortSchoolLife,
+} from "./utils/dataHandlers";
 
 import "./App.css";
 
@@ -17,7 +27,7 @@ import AppLoading from "./components/generic/Loading/AppLoading";
 import LandingPage from "./components/LandingPage/LandingPage";
 import EdpUnblock from "./components/EdpUnblock/EdpUnblock"
 import { useCreateNotification } from "./components/generic/PopUps/Notification";
-import { getGradeValue, calcAverage, findCategory, calcCategoryAverage, calcGeneralAverage, formatSkills, safeParseFloat, calcClassGeneralAverage, calcClassAverage } from "./utils/gradesTools";
+import { calcAverage, calcCategoryAverage, calcGeneralAverage } from "./utils/gradesTools";
 import { areOccurenciesEqual, createUserLists, encrypt, decrypt, getBrowser } from "./utils/utils";
 import { getCurrentSchoolYear } from "./utils/date";
 import EdpuLogo from "./components/graphics/EdpuLogo";
@@ -169,7 +179,7 @@ function initSettings(accountList) {
                 values: ["light", "auto", "dark"]
             },
             displayMode: {
-                value: getSetting("displfayMode", i),
+                value: getSetting("displayMode", i),
                 values: ["quality", "balanced", "performance"]
             },
             selectedChart: {
@@ -297,62 +307,6 @@ export default function App({ edpFetch }) {
     const actualDisplayTheme = getActualDisplayTheme(); // thème d'affichage réel (ex: dark ou light, et non pas auto)
     const createNotification = useCreateNotification();
 
-    class File {
-        constructor(id, type, file, name = file.slice(0, file.lastIndexOf(".")), specialParams = {}) {
-            /**id : 5018 / "654123546545612654984.pdf"
-             * type : NODEVOIR / FICHIER_CDT
-             * file : "file.pdf" / "TEST.txt"
-             * name : "the_name_of_the_file_downloaded_without_extension"
-             * specialParams : params needed in the URL in certains cases
-             */
-            this.id = id
-            this.type = type
-            this.name = name
-            this.extension = file.slice(file.lastIndexOf(".") + 1)
-            this.specialParams = specialParams
-            this.state = "inactive"
-        }
-
-        fetch() {
-            if (!this.blob) {
-                if (this.state !== "requestForInstall") {
-                    this.state = "fetching"
-                }
-                fetchFile(this.id, this.type, this.specialParams)
-                    .then(blob => {
-                        this.blob = blob;
-                        if (this.state === "requestForInstall") {
-                            this.install()
-                        }
-                    })
-            }
-        }
-
-        download() {
-            if (this.blob) {
-                this.install();
-            } else if (this.state === "fetching") {
-                this.state = "requestForInstall"
-            } else {
-                this.state = "requestForInstall"
-                this.fetch()
-            }
-        }
-
-        async install() {
-            const url = URL.createObjectURL(this.blob);
-            const a = document.createElement('a');
-
-            a.href = url;
-            a.download = `${this.name}.${this.extension}`;
-
-            document.body.appendChild(a);
-            a.click();
-
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-    }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //                                                                                                                                                                                  //
@@ -750,629 +704,6 @@ export default function App({ edpFetch }) {
         changeUserData("sortedGrades", sortedGrades);
     }
 
-    function setDefaultPeriod(sortedGrades = getUserData("sortedGrades")) {
-        let currentPeriod = 0;
-        for (let periodCode in sortedGrades) {
-            if (Date.now() > sortedGrades[periodCode].endDate) {
-                if (currentPeriod < Object.keys(sortedGrades).length - 1) {
-                    currentPeriod++;
-                }
-            }
-        }
-        changeUserData("activePeriod", Object.keys(sortedGrades)[currentPeriod]);
-    }
-
-    function sortGrades(grades, activeAccount) {
-        /**
-         * Filtre le JSON envoyé par l'API d'ED et le tri pour obtenir un objet plus facile d'utilisation
-         */
-        const periodsFromJson = grades[activeAccount].periodes;
-        const periods = {};
-        const generalAverageHistory = {}; // used for charts
-        const classGeneralAverageHistory = {}; // used for charts
-        const streakScoreHistory = {}; // used for charts
-        const subjectsComparativeInformation = {};
-        const totalBadges = {
-            "star": 0,
-            "bestStudent": 0,
-            "greatStudent": 0,
-            "stonks": 0,
-            "keepOnFire": 0,
-            "meh": 0,
-        };
-        const newLastGrades = []
-        if (periodsFromJson !== undefined) {
-            for (let period of periodsFromJson) {
-                if (period) {
-                    const newPeriod = {};
-                    subjectsComparativeInformation[period.codePeriode] = [];
-
-                    newPeriod.streak = 0;
-                    newPeriod.maxStreak = 0;
-                    newPeriod.name = period.periode;
-                    newPeriod.code = period.codePeriode;
-                    newPeriod.startDate = new Date(period.dateDebut);
-                    newPeriod.endDate = new Date(period.dateFin);
-                    newPeriod.isMockExam = period.examenBlanc;
-                    newPeriod.MTname = period.ensembleMatieres.nomPP;
-                    newPeriod.MTapreciation = period.ensembleMatieres.appreciationPP;
-                    newPeriod.classGeneralAverage = period.ensembleMatieres.moyenneClasse;
-                    newPeriod.subjects = {};
-                    let i = 0;
-                    for (let matiere of period.ensembleMatieres.disciplines) {
-                        // if (matiere.sousMatiere) {
-                        //     continue;
-                        // }
-                        let subjectCode = matiere.codeMatiere + matiere.codeSousMatiere;
-                        if (matiere.groupeMatiere) {
-                            subjectCode = "category" + i.toString();
-                            i++;
-                        }
-                        const newSubject = {};
-                        newSubject.code = subjectCode;
-                        newSubject.elementType = "subject";
-                        newSubject.id = matiere.id.toString();
-                        if (matiere.sousMatiere) {
-                            newSubject.name = matiere.codeMatiere + " - " + matiere.codeSousMatiere;
-                        } else {
-                            newSubject.name = matiere.discipline.replace(". ", ".").replace(".", ". ");
-                        }
-                        newSubject.classAverage = safeParseFloat(matiere.moyenneClasse);
-                        newSubject.minAverage = safeParseFloat(matiere.moyenneMin);
-                        newSubject.maxAverage = safeParseFloat(matiere.moyenneMax);
-                        newSubject.coef = matiere.coef;
-                        newSubject.size = matiere.effectif;
-                        newSubject.rank = matiere.rang;
-                        newSubject.isCategory = matiere.groupeMatiere;
-                        newSubject.isSubSubject = matiere.sousMatiere;
-                        newSubject.teachers = matiere.professeurs;
-                        newSubject.appreciations = matiere.appreciations;
-                        newSubject.grades = [];
-                        newSubject.average = "N/A";
-                        newSubject.streak = 0;
-                        newSubject.badges = {
-                            star: 0,
-                            bestStudent: 0,
-                            greatStudent: 0,
-                            stonks: 0,
-                            keepOnFire: 0,
-                            meh: 0,
-                        }
-                        newPeriod.subjects[subjectCode] = newSubject;
-                        subjectsComparativeInformation[period.codePeriode].push({
-                            subjectFullname: newSubject.name,
-                            classAverage: newSubject.classAverage,
-                            minAverage: newSubject.minAverage,
-                            maxAverage: newSubject.maxAverage
-                        });
-                    }
-                    periods[period.codePeriode] = newPeriod;
-                    generalAverageHistory[period.codePeriode] = { generalAverages: [], dates: [] };
-                    classGeneralAverageHistory[period.codePeriode] = { classGeneralAverages: [], dates: [] };
-                    streakScoreHistory[period.codePeriode] = [];
-                }
-            }
-            const gradesFromJson = grades[activeAccount].notes;
-            const subjectDatas = {};
-
-            const lastGrades = [...gradesFromJson].sort((elA, elB) => (new Date(elA.dateSaisie)).getTime() - (new Date(elB.dateSaisie)).getTime()).slice(-3);
-
-            for (let grade of (gradesFromJson ?? [])) {
-                // handle mock exam periods
-                let tempPeriodCode = grade.codePeriode;
-                let newPeriodCode = tempPeriodCode;
-                if (periods[tempPeriodCode].isMockExam) {
-                    newPeriodCode = tempPeriodCode.slice(0, 4);
-                    if (periods[newPeriodCode] === undefined) {
-                        newPeriodCode = Object.keys(periods)[Object.keys(periods).indexOf(tempPeriodCode) - 1];
-                        newPeriodCode = Object.keys(periods)[Object.keys(periods).indexOf(tempPeriodCode) - 1];
-                    }
-                }
-
-                const periodCode = newPeriodCode;
-                const subjectCode = grade.codeMatiere + grade.codeSousMatiere;
-                // try to rebuild the subject if it doesn't exist (happen when changing school year)
-                if (periods[periodCode].subjects[subjectCode] === undefined) {
-                    periods[periodCode].subjects[subjectCode] = {
-                        code: subjectCode,
-                        elementType: "subject",
-                        name: subjectCode,
-                        classAverage: "N/A",
-                        minAverage: "N/A",
-                        maxAverage: "N/A",
-                        coef: 1,
-                        size: "N/A",
-                        isCategory: false,
-                        teachers: [],
-                        appreciations: [],
-                        grades: [],
-                        average: 20,
-                        streak: 0,
-                        badges: {
-                            star: 0,
-                            bestStudent: 0,
-                            greatStudent: 0,
-                            stonks: 0,
-                            keepOnFire: 0,
-                            meh: 0,
-                        }
-                    }
-                }
-
-                const newGrade = {};
-                newGrade.elementType = "grade";
-                newGrade.id = grade.id.toString();
-                newGrade.name = grade.devoir;
-                newGrade.type = grade.typeDevoir;
-                newGrade.date = new Date(grade.date);
-                newGrade.entryDate = new Date(grade.dateSaisie);
-                newGrade.coef = safeParseFloat(grade.coef);
-                newGrade.scale = safeParseFloat(grade.noteSur);
-                newGrade.value = getGradeValue(grade.valeur);
-                newGrade.classMin = safeParseFloat(grade.minClasse);
-                newGrade.classMax = safeParseFloat(grade.maxClasse);
-                newGrade.classAverage = safeParseFloat(grade.moyenneClasse);
-                newGrade.subjectName = grade.libelleMatiere;
-                newGrade.isSignificant = !grade.nonSignificatif;
-                newGrade.examSubjectSRC = grade.uncSujet;
-                newGrade.examSubjectSRC = grade.uncSujet === "" ? undefined : new File(grade.uncSujet, "NODEVOIR", grade.uncSujet, `sujet-${grade.devoir}-${grade.subjectCode}`, { idDevoir: grade.id });
-                newGrade.examCorrectionSRC = grade.uncCorrige === "" ? undefined : new File(grade.uncCorrige, "NODEVOIR", grade.uncCorrige, `correction-${grade.devoir}-${grade.subjectCode}`, { idDevoir: grade.id });
-                newGrade.isReal = true;
-                /* Si newGrade.isReal est faux :
-                    pas de :
-                        - badges
-                        - streak
-                        - moyenne de classe/min/max
-                        - correction ni sujet
-                        - date
-                    différences : 
-                        - id = randomUUID
-                    choisit par l'utilisateur : 
-                        - name
-                        - coef
-                        - scale
-                        - value
-                        - type
-                */
-                if (!subjectDatas.hasOwnProperty(periodCode)) {
-                    subjectDatas[periodCode] = {};
-                }
-                if (!subjectDatas[periodCode].hasOwnProperty(subjectCode)) {
-                    subjectDatas[periodCode][subjectCode] = [];
-                }
-                subjectDatas[periodCode][subjectCode].push({ value: newGrade.value, coef: newGrade.coef, scale: newGrade.scale, isSignificant: newGrade.isSignificant, classAverage: newGrade.classAverage });
-                const nbSubjectGrades = periods[periodCode].subjects[subjectCode]?.grades.filter((el) => el.isSignificant).length ?? 0;
-                const subjectAverage = periods[periodCode].subjects[subjectCode].average;
-                const oldGeneralAverage = isNaN(periods[periodCode]?.generalAverage) ? 10 : periods[periodCode]?.generalAverage;
-                const average = calcAverage(subjectDatas[periodCode][subjectCode]);
-                const classAverage = calcClassAverage(subjectDatas[periodCode][subjectCode]);
-
-                // streak management
-                newGrade.upTheStreak = (!isNaN(newGrade.value) && newGrade.isSignificant && (nbSubjectGrades > 0 ? subjectAverage : oldGeneralAverage) <= average);
-                if (newGrade.upTheStreak) {
-                    periods[periodCode].streak += 1;
-                    if (periods[periodCode].streak > periods[periodCode].maxStreak) {
-                        periods[periodCode].maxStreak = periods[periodCode].streak;
-                    }
-                    periods[periodCode].totalStreak += 1;
-                    periods[periodCode].subjects[subjectCode].streak += 1;
-                } else {
-                    if (newGrade.isSignificant && !["Abs", "Disp", "NE", "EA", "Comp"].includes(newGrade.value)) {
-                        periods[periodCode].streak -= periods[periodCode].subjects[subjectCode].streak;
-                        periods[periodCode].subjects[subjectCode].streak = 0;
-
-                        // enlève le "upTheStreak" des notes précédant celle qu'on considère
-                        for (let grade of periods[periodCode].subjects[subjectCode].grades) {
-                            if (grade.upTheStreak) {
-                                grade.upTheStreak = "maybe";
-                            }
-                        }
-                    }
-                }
-                streakScoreHistory[periodCode].push(periods[periodCode].streak);
-
-                periods[periodCode].subjects[subjectCode].average = average;
-                periods[periodCode].subjects[subjectCode].classAverage = classAverage;
-
-                const category = findCategory(periods[periodCode], subjectCode);
-                if (category !== null) {
-                    const categoryAverage = calcCategoryAverage(periods[periodCode], category);
-                    periods[periodCode].subjects[category.code].average = categoryAverage;
-                }
-                const generalAverage = calcGeneralAverage(periods[periodCode]);
-                generalAverageHistory[periodCode].generalAverages.push(generalAverage);
-                generalAverageHistory[periodCode].dates.push(newGrade.date);
-                periods[periodCode].generalAverage = generalAverage;
-
-                const classGeneralAverage = calcClassGeneralAverage(periods[periodCode]);
-                classGeneralAverageHistory[periodCode].classGeneralAverages.push(classGeneralAverage);
-                classGeneralAverageHistory[periodCode].dates.push(newGrade.date);
-                periods[periodCode].classGeneralAverage = classGeneralAverage;
-
-                // création des badges
-                const gradeBadges = [];
-                if (!isNaN(newGrade.value)) {
-                    if (newGrade.value === newGrade.scale) { // si la note est au max on donne l'étoile (le parfait)
-                        gradeBadges.push("star");
-                        periods[periodCode].subjects[subjectCode].badges.star++
-                        totalBadges.star++
-                    }
-                    if (newGrade.value === newGrade.classMax) { // si la note est la meilleure de la classe on donne le plus
-                        gradeBadges.push("bestStudent");
-                        periods[periodCode].subjects[subjectCode].badges.bestStudent++
-                        totalBadges.bestStudent++
-                    }
-                    if (newGrade.value > newGrade.classAverage) { // si la note est > que la moyenne de la classe on donne le badge checkBox tier
-                        gradeBadges.push("greatStudent");
-                        periods[periodCode].subjects[subjectCode].badges.greatStudent++
-                        totalBadges.greatStudent++
-                    }
-                    if ((newGrade.value / newGrade.scale * 20) > subjectAverage) { // si la note est > que la moyenne de la matiere on donne le badge stonks tier
-                        gradeBadges.push("stonks");
-                        periods[periodCode].subjects[subjectCode].badges.stonks++
-                        totalBadges.stonks++
-                    }
-                    if (newGrade.upTheStreak) { // si la note up la streak on donne le badge de streak
-                        gradeBadges.push("keepOnFire");
-                        periods[periodCode].subjects[subjectCode].badges.keepOnFire++
-                        totalBadges.keepOnFire++
-                    }
-                    if ((newGrade.value / newGrade.scale * 20) === subjectAverage) { // si la note est = à la moyenne de la matiere on donne le badge = tier
-                        gradeBadges.push("meh");
-                        periods[periodCode].subjects[subjectCode].badges.meh++
-                        totalBadges.meh++
-                    }
-                }
-                newGrade.badges = gradeBadges;
-                newGrade.skill = formatSkills(grade.elementsProgramme)
-
-                periods[periodCode].subjects[subjectCode].grades.push(newGrade);
-                if (lastGrades.includes(grade)) {
-                    newLastGrades.push(newGrade)
-                }
-            }
-        }
-
-        // supprime les périodes vides et examens blancs
-        let i = 0;
-        let firstPeriod;
-        for (const key in periods) {
-            if (i === 0) {
-                firstPeriod = { key: key, value: periods[key] }
-            }
-            i++;
-            let isEmpty = true;
-            if (periods[key])
-                for (const subject in periods[key].subjects) {
-                    if (periods[key].subjects[subject].grades.length !== 0) {
-                        isEmpty = false;
-                    }
-                }
-            if (isEmpty || periods[key].isMockExam) {
-                delete periods[key];
-            }
-        }
-        // Ajoute une première période si c'est le début de l'année et que toutes les périodes sont vides
-        if (firstPeriod !== undefined && Object.keys(periods).length < 1) {
-            periods[firstPeriod.key] = firstPeriod.value;
-        }
-
-        const settings = grades[activeAccount].parametrage;
-        const enabledFeatures = {};
-
-        enabledFeatures.moyenneMin = settings.moyenneMin;
-        enabledFeatures.moyenneMax = settings.moyenneMax;
-        enabledFeatures.coefficient = settings.coefficientNote;
-        enabledFeatures.rank = settings.moyenneRang;
-
-        // add the average of all subjects a special type of chart
-        for (const period in periods) {
-            for (const subject in periods[period].subjects) {
-                for (const subjectID in subjectsComparativeInformation[period]) {
-                    if (periods[period].subjects[subject].name === subjectsComparativeInformation[period][subjectID].subjectFullname) {
-                        const newAverage = periods[period].subjects[subject].average;
-                        if (newAverage === "N/A" || periods[period].subjects[subject].classAverage === "N/A" || periods[period].subjects[subject].code.includes("category")) {
-                            subjectsComparativeInformation[period].splice(subjectID, 1);
-                            break;
-                        }
-                        subjectsComparativeInformation[period][subjectID].average = newAverage;
-                        break;
-                    }
-                }
-            }
-        }
-
-        changeUserData("totalBadges", totalBadges);
-        changeUserData("sortedGrades", periods);
-        changeUserData("generalAverageHistory", generalAverageHistory); // used for charts
-        changeUserData("classGeneralAverageHistory", classGeneralAverageHistory); // used for charts
-        changeUserData("streakScoreHistory", streakScoreHistory); // used for charts
-        changeUserData("subjectsComparativeInformation", subjectsComparativeInformation); // used for charts
-        changeUserData("gradesEnabledFeatures", enabledFeatures);
-        changeUserData("lastGrades", newLastGrades.reverse());
-        setDefaultPeriod(periods)
-    }
-
-    function sortNextHomeworks(homeworks) { // This function will sort (I would rather call it translate) the EcoleDirecte response to a better js object
-        const upcomingAssignments = []
-        const sortedHomeworks = Object.fromEntries(Object.entries(homeworks).map((day) => {
-            return [day[0], day[1].map((homework, i) => {
-                const { codeMatiere, aFaire, donneLe, effectue, idDevoir, interrogation, matiere, /* rendreEnLigne, documentsAFaire // I don't know what to do with that for now */ } = homework;
-                const task = {
-                    id: idDevoir,
-                    type: aFaire ? "task" : "sessionContent",
-                    subjectCode: codeMatiere,
-                    subject: matiere,
-                    addDate: donneLe,
-                    isInterrogation: interrogation,
-                    isDone: effectue,
-                }
-
-                if (interrogation && upcomingAssignments.length < 3) {
-                    upcomingAssignments.push({
-                        date: day[0],
-                        id: idDevoir,
-                        index: i,
-                        subject: matiere,
-                        subjectCode: codeMatiere,
-                    });
-                }
-
-                return task;
-            })]
-        }))
-
-        if (upcomingAssignments.length > 0) {
-            let i = 0;
-            while (upcomingAssignments.length < 3) {
-                upcomingAssignments.push({
-                    id: "dummy" + i,
-                });
-                i++;
-            }
-        }
-        changeUserData("upcomingAssignments", upcomingAssignments)
-        return sortedHomeworks
-    }
-
-    function sortDayHomeworks(homeworks) { // This function will sort (I would rather call it translate) the EcoleDirecte response to a better js object 
-        const sortedHomeworks = Object.fromEntries(Object.entries(homeworks).map((day) => {
-            return [day[0], day[1].map((homework) => {
-                const { aFaire, codeMatiere, id, interrogation, matiere, nomProf } = homework;
-                var contenuDeSeance = homework.contenuDeSeance;
-                if (!aFaire && !contenuDeSeance) {
-                    return null;
-                }
-
-                if (!contenuDeSeance) {
-                    contenuDeSeance = aFaire.contenuDeSeance;
-                }
-
-                if (aFaire) {
-
-                    const { donneLe, effectue, contenu, documents } = aFaire;
-
-                    return {
-                        id: id,
-                        type: "task",
-                        subjectCode: codeMatiere,
-                        subject: matiere,
-                        addDate: donneLe,
-                        isInterrogation: interrogation,
-                        isDone: effectue,
-                        teacher: nomProf,
-                        content: contenu,
-                        files: documents.map((e) => (new File(e.id, e.type, e.libelle))),
-                        sessionContent: contenuDeSeance.contenu,
-                        sessionContentFiles: contenuDeSeance.documents.map((e) => (new File(e.id, e.type, e.libelle)))
-                    }
-                }
-                else {
-                    // This handles the case where there is no homework but there is a session content. I think it can be improved but for now it's fine
-                    return {
-                        id: id,
-                        type: "sessionContent",
-                        subjectCode: codeMatiere,
-                        subject: matiere,
-                        addDate: day[0],
-                        teacher: nomProf,
-                        sessionContent: contenuDeSeance.contenu,
-                        sessionContentFiles: contenuDeSeance.documents.map((e) => (new File(e.id, e.type, e.libelle)))
-                    }
-                }
-            }).filter((item) => item)]
-        }))
-        return sortedHomeworks
-    }
-
-
-    function sortMessageFolders(messages, origin = 0) {
-        const oldMessageFolders = useUserData("messageFolders").get();
-        let sortedMessageFolders = messages.classeurs.filter((folder) => (oldMessageFolders === undefined || !oldMessageFolders.some((oldFolder) => oldFolder.id === folder.id))).map((folder) => {
-            return {
-                id: folder.id,
-                name: folder.libelle,
-                fetchInitiated: false,
-                fetched: origin === folder.id
-            }
-        });
-        if (oldMessageFolders === undefined) {
-            sortedMessageFolders.unshift({
-                id: 0,
-                name: "Boîte de réception",
-                fetchInitiated: true,
-                fetched: origin === 0
-            })
-        } else {
-            sortedMessageFolders.unshift(oldMessageFolders.map((folder) => { folder.id === origin && (folder.fetched = true); return folder }));
-            sortedMessageFolders = sortedMessageFolders.flat();
-        }
-        // Add hardcoded folders
-        if (!sortedMessageFolders.some((folder) => folder.id === -1)) {
-            sortedMessageFolders.push({
-                id: -1,
-                name: "Envoyés",
-                fetchInitiated: false,
-                fetched: origin === -1
-            })
-        }
-        if (!sortedMessageFolders.some((folder) => folder.id === -2)) {
-            sortedMessageFolders.push({
-                id: -2,
-                name: "Archivés",
-                fetchInitiated: false,
-                fetched: origin === -2
-            })
-        }
-        if (!sortedMessageFolders.some((folder) => folder.id === -3)) {
-            sortedMessageFolders.push({
-                id: -3,
-                name: "Nouveau dossier",
-                // This is a virtual folder (it doesn't exist at all, it's just a button to create a new folder so it doesn't need to be fetched)
-                fetchInitiated: true,
-                fetched: true
-            })
-        }
-        if (!sortedMessageFolders.some((folder) => folder.id === -4)) {
-            sortedMessageFolders.push({
-                id: -4,
-                name: "Brouillons",
-                fetchInitiated: false,
-                fetched: origin === -4
-            })
-        }
-
-        return sortedMessageFolders;
-    }
-
-
-    function sortMessages(messages, type) {
-        let sortedMessages = [];
-        // This handles the special folders (sent, received, archived) by adressign them an unused folderId
-        if (type === "received") {
-            sortedMessages = messages.messages.received.map((message) => {
-                return {
-                    date: message.date,
-                    files: structuredClone(message.files)?.map((file) => new File(file.id, file.type, file.libelle)),
-                    from: message.from,
-                    id: message.id,
-                    folderId: message.idClasseur,
-                    read: message.read,
-                    subject: message.subject,
-                    content: null,
-                    // ...
-                }
-            });
-        } else if (type === "sent") {
-            sortedMessages = messages.messages.sent.map((message) => {
-                return {
-                    date: message.date,
-                    files: structuredClone(message.files)?.map((file) => new File(file.id, file.type, file.libelle)),
-                    from: message.from,
-                    id: message.id,
-                    folderId: -1,
-                    read: message.read,
-                    subject: message.subject,
-                    content: null,
-                    // ...
-                }
-            });
-        }
-        else if (type === "archived") {
-            sortedMessages = messages.messages.archived.map((message) => {
-                return {
-                    date: message.date,
-                    files: structuredClone(message.files)?.map((file) => new File(file.id, file.type, file.libelle)),
-                    from: message.from,
-                    id: message.id,
-                    folderId: -2,
-                    read: message.read,
-                    subject: message.subject,
-                    content: null,
-                    // ...
-                }
-            });
-        }
-        else if (type === "draft") {
-            sortedMessages = messages.messages.draft.map((message) => {
-                return {
-                    date: message.date,
-                    files: structuredClone(message.files)?.map((file) => new File(file.id, file.type, file.libelle)),
-                    from: message.from,
-                    id: message.id,
-                    folderId: -4,
-                    read: message.read,
-                    subject: message.subject,
-                    content: null,
-                    // ...
-                }
-            });
-        }
-
-        return sortedMessages;
-    }
-
-    function sortMessageContent(messageContent) {
-        if (!messageContent) {
-            return;
-        }
-        const oldSortedMessages = useUserData("sortedMessages").get();
-        const targetMessageIdx = oldSortedMessages.findIndex((item) => item.id === messageContent.id);
-        oldSortedMessages[targetMessageIdx].read = true;
-        oldSortedMessages[targetMessageIdx].files = messageContent.files.map((file) => new File(file.id, file.type, file.libelle));
-        oldSortedMessages[targetMessageIdx].content = {
-            id: messageContent.id,
-            subject: messageContent.subject,
-            date: messageContent.subject,
-            content: messageContent.content
-            // ...
-        };
-        useUserData("sortedMessages").set(oldSortedMessages);
-    }
-
-    function sortSchoolLife(schoolLife, activeAccount) {
-        const sortedSchoolLife = {
-            delays: [],
-            absences: [],
-            sanctions: [],
-            incidents: []
-        };
-        schoolLife[activeAccount]?.absencesRetards.concat(schoolLife[activeAccount].sanctionsEncouragements ?? []).forEach((item) => {
-            const newItem = {};
-            newItem.type = item.typeElement;
-            newItem.id = item.id;
-            newItem.isJustified = item.justifie;
-            newItem.date = new Date(item.date);
-            newItem.displayDate = item.displayDate;
-            newItem.duration = item.libelle;
-            newItem.reason = item.motif;
-            newItem.comment = item.commentaire;
-            newItem.todo = item.aFaire;
-            newItem.by = item.par;
-            switch (newItem.type) {
-                case "Retard":
-                    sortedSchoolLife.delays.push(newItem);
-                    break;
-
-                case "Absence":
-                    sortedSchoolLife.absences.push(newItem);
-                    break;
-
-                case "Punition":
-                    sortedSchoolLife.sanctions.push(newItem);
-                    break;
-                case "Incident":
-                    sortedSchoolLife.incidents.push(newItem);
-                    break;
-
-                default:
-                    break;
-            }
-        });
-
-        changeUserData("sortedSchoolLife", sortedSchoolLife);
-    }
-
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //                                                                                                                                                                                  //
     //                                                                                  Fetch Functions                                                                                 //
@@ -1706,7 +1037,10 @@ export default function App({ edpFetch }) {
                 if (code === 200) {
                     let usersGrades = structuredClone(grades);
                     usersGrades[userId] = response.data;
-                    // usersGrades[userId] = testGrades.data;
+                    const sorted = sortGrades(usersGrades, activeAccount);
+                    for (const [key, value] of Object.entries(sorted)) {
+                        changeUserData(key, value);
+                    }
                     setGrades(usersGrades);
                 } else if (code === 520 || code === 525) {
                     // token invalide
@@ -1743,7 +1077,9 @@ export default function App({ edpFetch }) {
         if (accountsListState[activeAccount].firstName === "Guest") {
             if (date === "incoming") {
                 import("./data/homeworks.json").then((module) => {
-                    changeUserData("sortedHomeworks", sortNextHomeworks(module.data))
+                    const { sortedHomeworks, upcomingAssignments } = sortNextHomeworks(module.data);
+                    changeUserData("upcomingAssignments", upcomingAssignments);
+                    changeUserData("sortedHomeworks", sortedHomeworks);
                 })
             } else {
                 import("./data/detailed_homeworks.json").then((module) => {
@@ -1769,9 +1105,11 @@ export default function App({ edpFetch }) {
                     const code = response.code;
                     if (code === 200) {
                         if (date === "incoming") {
-                            changeUserData("sortedHomeworks", { ...sortNextHomeworks(response.data), ...getUserData("sortedHomeworks") })
+                            const { sortedHomeworks, upcomingAssignments } = sortNextHomeworks(response.data);
+                            changeUserData("upcomingAssignments", upcomingAssignments);
+                            changeUserData("sortedHomeworks", { ...sortedHomeworks, ...getUserData("sortedHomeworks") });
                         } else {
-                            changeUserData("sortedHomeworks", { ...getUserData("sortedHomeworks"), ...sortDayHomeworks({ [response.data.date]: response.data.matieres }) })
+                            changeUserData("sortedHomeworks", { ...getUserData("sortedHomeworks"), ...sortDayHomeworks({ [response.data.date]: response.data.matieres }) });
                         }
                     } else if (code === 520 || code === 525) {
                         // token invalide
@@ -1807,7 +1145,9 @@ export default function App({ edpFetch }) {
         if (accountsListState[activeAccount].firstName === "Guest") {
             if (date === "incoming") {
                 const module = await import("./data/homeworks.json");
-                changeUserData("sortedHomeworks", sortNextHomeworks(module.data));
+                const { sortedHomeworks, upcomingAssignments } = sortNextHomeworks(module.data);
+                changeUserData("upcomingAssignments", upcomingAssignments);
+                changeUserData("sortedHomeworks", sortedHomeworks);
             } else {
                 const module = await import("./data/detailed_homeworks.json");
                 changeUserData("sortedHomeworks", {
@@ -1835,8 +1175,10 @@ export default function App({ edpFetch }) {
                 const code = responseData.code;
                 if (code === 200) {
                     if (date === "incoming") {
+                        const { sortedHomeworks, upcomingAssignments } = sortNextHomeworks(responseData.data);
+                        changeUserData("upcomingAssignments", upcomingAssignments);
                         changeUserData("sortedHomeworks", {
-                            ...sortNextHomeworks(responseData.data),
+                            ...sortedHomeworks,
                             ...getUserData("sortedHomeworks")
                         });
                     } else {
@@ -1973,7 +1315,7 @@ export default function App({ edpFetch }) {
                         folderId = -4;
                     }
                     changeUserData("sortedMessages", oldSortedMessages.flat());
-                    changeUserData("messageFolders", sortMessageFolders(response.data, folderId));
+                    changeUserData("messageFolders", sortMessageFolders(response.data, useUserData("messageFolders").get(), folderId));
                 } else if (code === 520 || code === 525) {
                     // token invalide
                     requireLogin();
@@ -2028,7 +1370,7 @@ export default function App({ edpFetch }) {
                     code = response.code;
                 }
                 if (code === 200) {
-                    sortMessageContent(response.data)
+                    changeUserData("sortedMessages", sortMessageContent(response.data, useUserData("sortedMessages").get()));
                 } else if (code === 520 || code === 525) {
                     // token invalide
                     requireLogin();
@@ -2120,6 +1462,7 @@ export default function App({ edpFetch }) {
                 if (code === 200 || code === 210) { // 210: quand l'utilisateur n'a pas de retard/absence/sanction
                     const oldSchoolLife = structuredClone(schoolLife);
                     oldSchoolLife[activeAccount] = response.data;
+                    changeUserData("sortedSchoolLife", sortSchoolLife(oldSchoolLife, activeAccount));
                     setSchoolLife(oldSchoolLife);
                     setTokenState(response.token);
                 } else if (code === 520 || code === 525) {
@@ -2202,23 +1545,6 @@ export default function App({ edpFetch }) {
         )
     }
 
-    async function fetchFile(id, type, specialParams) {
-        const { idDevoir } = specialParams
-        return await edpFetch(
-            `https://api.ecoledirecte.com/v3/telechargement.awp?verbe=get&fichierId=${id}&leTypeDeFichier=${type}${idDevoir ? `&idDevoir=${idDevoir}` : ""}`,
-            {
-                method: "POST",
-                headers: {
-                    "x-token": tokenState
-                },
-                cors: "no-cors",
-                body: `data=${JSON.stringify({ forceDownload: 0 })}`,
-                referrerPolicy: "no-referrer"
-            },
-            "blob"
-        )
-            .catch(error => console.error('Erreur lors du téléchargement du fichier:', error))
-    }
 
     async function fetchAdministrativeDocuments(selectedYear, controller = (new AbortController())) {
         abortControllers.current.push(controller);
@@ -2829,6 +2155,8 @@ export default function App({ edpFetch }) {
         globalSettings,
         actualDisplayTheme,
         currentEDPVersion,
+        edpFetch,
+        tokenState,
     }), [
         useUserData,
         useUserSettings,
@@ -2848,7 +2176,9 @@ export default function App({ edpFetch }) {
         isDevChannel,
         globalSettings,
         actualDisplayTheme,
-        currentEDPVersion
+        currentEDPVersion,
+        edpFetch,
+        tokenState,
     ]);
 
     return (
